@@ -1,83 +1,83 @@
 import discord
 from discord.ext import commands
-import os  
-from dotenv import load_dotenv
-load_dotenv()
+import os
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Diccionario para almacenar las deudas: {deudor: {acreedor: cantidad}}
+# Estructura: contadores[deudor_id][acreedor_id] = cantidad
 contadores = {}
 
 @bot.event
 async def on_ready():
-    print(f"✅ Bot conectado como {bot.user}")
+    print(f'Bot conectado como {bot.user}')
 
 @bot.command()
 async def contar(ctx, usuario: discord.Member):
     autor = ctx.author
-    autor_id = str(autor.id)
-    usuario_id = str(usuario.id)
+    deudor_id = autor.id
+    acreedor_id = usuario.id
 
-    if autor_id == usuario_id:
-        await ctx.send("No podés contarte a vos mismo.")
+    if deudor_id == acreedor_id:
+        await ctx.send("No te puedes contar a ti mismo.")
         return
 
-    # Asegurar claves en el diccionario
-    contadores.setdefault(autor_id, {})
-    contadores.setdefault(usuario_id, {})
+    if deudor_id not in contadores:
+        contadores[deudor_id] = {}
 
-    # Si el usuario le debe al autor, restamos
-    if autor_id in contadores[usuario_id]:
-        contadores[usuario_id][autor_id] -= 1
-        if contadores[usuario_id][autor_id] <= 0:
-            del contadores[usuario_id][autor_id]
-        await ctx.send(f"{usuario.mention} le debe {contadores[usuario_id].get(autor_id, 0)} a {autor.mention}")
+    contadores[deudor_id][acreedor_id] = contadores[deudor_id].get(acreedor_id, 0) + 1
+
+    # Compensar deuda contraria si existe
+    if acreedor_id in contadores and deudor_id in contadores[acreedor_id]:
+        deuda_opuesta = contadores[acreedor_id][deudor_id]
+        if deuda_opuesta > 0:
+            min_deuda = min(contadores[deudor_id][acreedor_id], deuda_opuesta)
+            contadores[deudor_id][acreedor_id] -= min_deuda
+            contadores[acreedor_id][deudor_id] -= min_deuda
+
+            # Limpieza si quedó en 0 o menos
+            if contadores[deudor_id][acreedor_id] <= 0:
+                del contadores[deudor_id][acreedor_id]
+            if contadores[acreedor_id][deudor_id] <= 0:
+                del contadores[acreedor_id][deudor_id]
+
+    deuda_actual = contadores.get(deudor_id, {}).get(acreedor_id, 0)
+
+    if deuda_actual <= 0:
+        # Ya están a mano
+        await ctx.send(f"Ahora están a mano {autor.mention} {usuario.mention}")
     else:
-        # Si el autor le debe al usuario, sumamos
-        contadores[autor_id][usuario_id] = contadores[autor_id].get(usuario_id, 0) + 1
-        await ctx.send(f"{autor.mention} le debe {contadores[autor_id][usuario_id]} a {usuario.mention}")
+        await ctx.send(f"{autor.mention} le debe {deuda_actual} a {usuario.mention}")
 
 @bot.command()
 async def leaderboard(ctx):
+    mensaje = "**Leaderboard de deudas:**\n"
     if not contadores:
-        await ctx.send("Nadie le debe nada a nadie.")
-        return
-
-    lines = []
-    for deudor_id, acreedores in contadores.items():
-        for acreedor_id, cantidad in acreedores.items():
-            if cantidad > 0:
-                deudor = await bot.fetch_user(int(deudor_id))
-                acreedor = await bot.fetch_user(int(acreedor_id))
-                lines.append(f"{deudor.mention} le debe {cantidad} a {acreedor.mention}")
-
-    if lines:
-        await ctx.send("\n".join(lines))
+        mensaje += "No hay deudas registradas."
     else:
-        await ctx.send("No hay deudas activas.")
+        for deudor_id, acreedores in contadores.items():
+            deudor = bot.get_user(deudor_id)
+            for acreedor_id, cantidad in acreedores.items():
+                acreedor = bot.get_user(acreedor_id)
+                mensaje += f"{deudor.mention} le debe {cantidad} a {acreedor.mention}\n"
+    await ctx.send(mensaje)
 
 @bot.command()
 async def l(ctx, usuario: discord.Member):
-    usuario_id = str(usuario.id)
-
-    if usuario_id not in contadores or not contadores[usuario_id]:
-        await ctx.send(f"{usuario.mention} no le debe nada a nadie.")
-        return
-
-    deudas = []
-    for acreedor_id, cantidad in contadores[usuario_id].items():
-        if cantidad > 0:
-            acreedor = await bot.fetch_user(int(acreedor_id))
-            deudas.append(f"{usuario.mention} le debe {cantidad} a {acreedor.mention}")
-
-    if deudas:
-        await ctx.send("\n".join(deudas))
+    acreedor_id = usuario.id
+    deudores = []
+    for deudor_id, acreedores in contadores.items():
+        if acreedor_id in acreedores:
+            deuda = acreedores[acreedor_id]
+            if deuda > 0:
+                deudor = bot.get_user(deudor_id)
+                deudores.append(deudor.mention)
+    if deudores:
+        await ctx.send(f"{usuario.mention} le deben: {', '.join(deudores)}")
     else:
-        await ctx.send(f"{usuario.mention} no le debe nada a nadie.")
+        await ctx.send(f"Nadie le debe nada a {usuario.mention}.")
 
+# Token desde variable de entorno
 bot.run(os.getenv("DISCORD_TOKEN"))
