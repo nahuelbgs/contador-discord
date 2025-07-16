@@ -7,7 +7,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Estructura: contadores[deudor_id][acreedor_id] = cantidad
+# contadores[deudor_id][acreedor_id] = cantidad
 contadores = {}
 
 @bot.event
@@ -27,28 +27,21 @@ async def contar(ctx, usuario: discord.Member):
     if deudor_id not in contadores:
         contadores[deudor_id] = {}
 
-    contadores[deudor_id][acreedor_id] = contadores[deudor_id].get(acreedor_id, 0) + 1
+    deuda_opuesta = contadores.get(acreedor_id, {}).get(deudor_id, 0)
 
-    # Compensar deuda contraria si existe
-    if acreedor_id in contadores and deudor_id in contadores[acreedor_id]:
-        deuda_opuesta = contadores[acreedor_id][deudor_id]
-        if deuda_opuesta > 0:
-            min_deuda = min(contadores[deudor_id][acreedor_id], deuda_opuesta)
-            contadores[deudor_id][acreedor_id] -= min_deuda
-            contadores[acreedor_id][deudor_id] -= min_deuda
-
-            # Limpieza si quedó en 0 o menos
-            if contadores[deudor_id][acreedor_id] <= 0:
-                del contadores[deudor_id][acreedor_id]
-            if contadores[acreedor_id][deudor_id] <= 0:
-                del contadores[acreedor_id][deudor_id]
-
-    deuda_actual = contadores.get(deudor_id, {}).get(acreedor_id, 0)
-
-    if deuda_actual <= 0:
-        # Ya están a mano
-        await ctx.send(f"Ahora están a mano {autor.mention} {usuario.mention}")
+    if deuda_opuesta > 0:
+        # Reducir deuda contraria en 1
+        contadores[acreedor_id][deudor_id] -= 1
+        deuda_restante = contadores[acreedor_id][deudor_id]
+        if deuda_restante == 0:
+            del contadores[acreedor_id][deudor_id]
+            await ctx.send(f"Ahora están a mano {autor.mention} {usuario.mention}")
+        else:
+            await ctx.send(f"{usuario.mention} le debe {deuda_restante} a {autor.mention}")
     else:
+        # Sumar deuda normal
+        contadores[deudor_id][acreedor_id] = contadores[deudor_id].get(acreedor_id, 0) + 1
+        deuda_actual = contadores[deudor_id][acreedor_id]
         await ctx.send(f"{autor.mention} le debe {deuda_actual} a {usuario.mention}")
 
 @bot.command()
@@ -79,5 +72,4 @@ async def l(ctx, usuario: discord.Member):
     else:
         await ctx.send(f"Nadie le debe nada a {usuario.mention}.")
 
-# Token desde variable de entorno
 bot.run(os.getenv("DISCORD_TOKEN"))
